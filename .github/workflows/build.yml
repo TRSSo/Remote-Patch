@@ -8,6 +8,7 @@ on:
 
 env:
   SEVENZIP_VER: "v26.02-v1.5.7-R2"
+  SEVENZIP_NAME: "7z26.02-zstd-x64.exe"
   SEVENZIP_SFX_VER: "v25.01-v1.5.7-R3"
   HDIFFPATCH_VER: "v5.1.3"
   HSYNZ_VER: "v1.3.0"
@@ -33,17 +34,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Collect files
+      - name: Set environment
         run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION=${{ github.ref_name }}
+          else
+            VERSION=$(head -c7 <<< "${{ github.sha }}")
+          fi
           mkdir payload
-          mv -vf ./*.ps1 payload
+          for i in ./*.ps1; do
+            sed s/v0.0.0/$VERSION/ "$i" > "payload/$i"
+          done
 
       - name: Download 7-Zip-zstd (Windows x64)
         run: |
-          curl -fSLo 7z-zstd-x64.exe \
-            "https://github.com/mcmilk/7-Zip-zstd/releases/download/${SEVENZIP_VER}/7z26.02-zstd-x64.exe"
-          echo "${SEVENZIP_WIN_SHA256} 7z-zstd-x64.exe" | sha256sum -c
-          7z e -y 7z-zstd-x64.exe -otemp
+          curl -fSLo 7z-zstd.exe \
+            "https://github.com/mcmilk/7-Zip-zstd/releases/download/${SEVENZIP_VER}/${SEVENZIP_NAME}"
+          echo "${SEVENZIP_WIN_SHA256} 7z-zstd.exe" | sha256sum -c
+          7z e -y 7z-zstd.exe -otemp
           mv -vf temp/7z.{exe,dll} payload
           rm -rf temp
 
@@ -84,30 +92,22 @@ jobs:
           rm -rf temp
           chmod +x 7zz
 
-      - name: Create 7z archive (zstd)
+      - name: Create 7-Zip-zstd archive
         run: |
           cd payload
           ../7zz a -m0=zstd -mmax ../payload.7z \*
 
-      - name: Create 7z SFX installer
+      - name: Create 7-Zip-zstd SFX executable
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            BRANCH_NAME="${GITHUB_REF#refs/tags/}"
-          else
-            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
-          fi
-          BRANCH_NAME="${BRANCH_NAME//\//-}"
-          OUTPUT_NAME="TRSS-PatchGUI-${BRANCH_NAME}.exe"
-
+          OUTPUT_NAME="TRSS-PatchGUI-${GITHUB_REF_NAME//\//-}.exe"
           cat payload/7zSD.sfx - payload.7z > "$OUTPUT_NAME" << 'EOF'
           ;!@Install@!UTF-8!
           ExecuteFile="powershell.exe"
           ExecuteParameters="-NoProfile -ExecutionPolicy Bypass -File .\gui.ps1"
           ;!@InstallEnd@!
           EOF
-
           echo "OUTPUT_NAME=${OUTPUT_NAME}" >> "$GITHUB_ENV"
-          ls -lh "$OUTPUT_NAME"
+          stat "$OUTPUT_NAME"
           sha256sum "$OUTPUT_NAME"
 
       - name: Upload artifact

@@ -1,29 +1,8 @@
-﻿Add-Type -AssemblyName System.Windows.Forms
+﻿$TitleText = '远程补丁工具 v0.0.0'
+Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
-Add-Type -ReferencedAssemblies System -TypeDefinition @'
-using System;
-using System.Diagnostics;
-
-public static class PatchToolLogger {
-  public static DataReceivedEventHandler Create(string tag, bool isError) {
-    return (sender, e) => {
-      if (e.Data == null) return;
-
-      try {
-        string time = DateTime.Now.ToString("HH:mm:ss");
-
-        if (isError) {
-          Console.WriteLine("[{0}] [{1}][错误] {2}", time, tag, e.Data);
-        } else {
-          Console.WriteLine("[{0}] [{1}] {2}", time, tag, e.Data);
-        }
-      } catch {}
-    };
-  }
-}
-'@
 
 $ScriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { (Get-Location).Path }
 
@@ -87,7 +66,7 @@ $F = @{
 
 # ---------------- 窗体 ----------------
 $form = New-Object System.Windows.Forms.Form
-$form.Text = '远程补丁工具'
+$form.Text = $TitleText
 $form.ClientSize = New-Object Drawing.Size(880, 311)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedDialog'
@@ -112,7 +91,7 @@ $lblTitle.AutoSize = $true
 $lblTitle.Location = New-Object Drawing.Point(30, 12)
 $lblTitle.Font = $F.title
 $lblTitle.ForeColor = $C.primary
-$lblTitle.Text = '远程补丁工具'
+$lblTitle.Text = $TitleText
 $pHead.Controls.Add($lblTitle)
 
 $lblSub = New-Object System.Windows.Forms.Label
@@ -328,27 +307,25 @@ $pStatus.Controls.Add($stPatch)
 # ---------------- 任务状态 ----------------
 $S = @{
   create = @{
-    Script   = 'create.ps1'
-    Tag      = '检测'
-    Label    = '检测包'
-    Button   = $btnCreate
-    Status   = $stCreate
-    Accent   = $C.cyan
-    Running  = $false
-    Process  = $null
-    Handlers = $null
+    Script  = 'create.ps1'
+    Tag     = '检测'
+    Label   = '检测包'
+    Button  = $btnCreate
+    Status  = $stCreate
+    Accent  = $C.cyan
+    Running = $false
+    Process = $null
   }
 
-  patch  = @{
-    Script   = 'patch.ps1'
-    Tag      = '补丁'
-    Label    = '补丁包'
-    Button   = $btnPatch
-    Status   = $stPatch
-    Accent   = $C.amber
-    Running  = $false
-    Process  = $null
-    Handlers = $null
+  patch = @{
+    Script  = 'patch.ps1'
+    Tag     = '补丁'
+    Label   = '补丁包'
+    Button  = $btnPatch
+    Status  = $stPatch
+    Accent  = $C.amber
+    Running = $false
+    Process = $null
   }
 }
 
@@ -370,34 +347,14 @@ function Start-Job([string]$key) {
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = 'powershell.exe'
   $psi.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "' + $j.Script + '"'
-  $psi.UseShellExecute = $false
-  $psi.CreateNoWindow = $true
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
   $psi.WorkingDirectory = $ScriptDir
-  $psi.StandardOutputEncoding = [System.Text.Encoding]::Default
-  $psi.StandardErrorEncoding  = [System.Text.Encoding]::Default
+  $psi.UseShellExecute = $false
 
   $p = New-Object System.Diagnostics.Process
   $p.StartInfo = $psi
 
-  # 使用 .NET 原生事件，不再使用 Register-ObjectEvent
-  $outHandler = [PatchToolLogger]::Create($j.Tag, $false)
-  $errHandler = [PatchToolLogger]::Create($j.Tag, $true)
-
-  $p.add_OutputDataReceived($outHandler)
-  $p.add_ErrorDataReceived($errHandler)
-
-  $j.Handlers = @{
-    Out = $outHandler
-    Err = $errHandler
-  }
-
   [void]$p.Start()
   $cpid = $p.Id
-
-  $p.BeginOutputReadLine()
-  $p.BeginErrorReadLine()
 
   $j.Process = $p
   $j.Running = $true
@@ -413,9 +370,7 @@ function Start-Job([string]$key) {
 function Finish-Job([string]$key, [bool]$stopped) {
   $j = $S[$key]
 
-  if (-not $j.Running) {
-    return
-  }
+  if (-not $j.Running) { return }
 
   $p = $j.Process
   $code = 0
@@ -424,26 +379,6 @@ function Finish-Job([string]$key, [bool]$stopped) {
     $code = $p.ExitCode
   } catch {}
 
-  try {
-    $p.CancelOutputRead()
-  } catch {}
-
-  try {
-    $p.CancelErrorRead()
-  } catch {}
-
-  # 使用 .NET 原生事件卸载，不再使用 Unregister-ObjectEvent
-  if ($j.Handlers) {
-    try {
-      $p.remove_OutputDataReceived($j.Handlers.Out)
-    } catch {}
-
-    try {
-      $p.remove_ErrorDataReceived($j.Handlers.Err)
-    } catch {}
-  }
-
-  $j.Handlers = $null
   $j.Running = $false
   $j.Process = $null
 
@@ -474,19 +409,19 @@ function Finish-Job([string]$key, [bool]$stopped) {
 function Stop-Job([string]$key) {
   $j = $S[$key]
   $p = $j.Process
-  if ($null -eq $p) { return }
+  if (-not $p) { return }
   $cp = 0
   try { $cp = $p.Id } catch {}
 
   $ans = [System.Windows.Forms.MessageBox]::Show($form,
     "确定要停止创建$($j.Label)吗？`n将强制终止进程树 (PID $cp)",
     '确认停止', 'OKCancel', 'Warning', 'Button2')
-  if ($ans -ne 'OK') { return }
+  if ($ans -ne 'OK' -or -not $j.Running) { return }
 
   $j.Button.Enabled = $false
   $j.Button.Text = '正在停止…'
   Write-Log "[$($j.Tag)] 正在停止：taskkill /F /T /PID $cp" 'Yellow'
-  if ($cp -gt 0) { & taskkill.exe /F /T /PID $cp 2>&1 | Out-Null }
+  Write-Log "[$($j.Tag)] $(& taskkill.exe /F /T /PID $cp 2>&1)"
 
   $done = $false
   try { $done = $p.WaitForExit(8000) } catch {}   # 等待子进程退出
@@ -504,9 +439,9 @@ $btnPatch.Add_Click({ if ($S.patch.Running) { Stop-Job 'patch' } else { Start-Jo
 $form.Add_FormClosing({
   foreach ($k in 'create', 'patch') {
     $j = $S[$k]
-    if ($j.Running -and $null -ne $j.Process) {
+    if ($j.Running -and $j.Process) {
       $cp = 0; try { $cp = $j.Process.Id } catch {}
-      if ($cp -gt 0) { & taskkill.exe /F /T /PID $cp 2>&1 | Out-Null }
+      if ($cp -gt 0) { & taskkill.exe /F /T /PID $cp }
       try { $j.Process.WaitForExit(3000) } catch {}
     }
   }
