@@ -119,106 +119,106 @@ $wfPanel.GetType().GetProperty('DoubleBuffered', [Reflection.BindingFlags]'Insta
 $form.Controls.Add($wfPanel)
 
 $wfPanel.Add_Paint({
-  param($sender, $e)
-  $g = $e.Graphics
-  $g.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $g.TextRenderingHint = [Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+    param($sender, $e)
+    $g = $e.Graphics
+    $g.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.TextRenderingHint = [Drawing.Text.TextRenderingHint]::ClearTypeGridFit
 
-  $chipH = 34
-  $minGap = 8
-  $sideMargin = 16
+    $chipH = 34
+    $minGap = 8
+    $sideMargin = 16
 
-  # 自适应步骤字号：逐级缩小直到 5 个胶囊放得下（兼容高 DPI / 大字体）
-  $chipFont = $null
-  $widths = $null
-  $total = 0
-  foreach ($fs in (24 .. 16)) {
-    $tryFont = New-Object Drawing.Font('Microsoft YaHei UI', ($fs / 2))
-    $tryWidths = @()
-    $tryTotal = 0
-    foreach ($st in $Steps) {
-      $tw = [System.Windows.Forms.TextRenderer]::MeasureText($st.T, $tryFont).Width
-      $w = 12 + 20 + 8 + $tw + 13
-      $tryWidths += $w
-      $tryTotal += $w
-    }
-    if ($null -ne $chipFont) { $chipFont.Dispose() }
-    $chipFont = $tryFont
-    $widths = $tryWidths
-    $total = $tryTotal
-    if (($total + $minGap * 4) -le ($sender.Width - $sideMargin * 2)) { break }
-  }
-
-  # 间距计算与无箭头版本完全相同 → 整体占位、两侧边距不变
-  $gap = [int](($sender.Width - $sideMargin * 2 - $total) / 4)
-  if ($gap -lt $minGap) { $gap = $minGap }
-  if ($gap -gt 48) { $gap = 48 }
-
-  # 箭头字号自适应：保证箭头宽度不超过间距（塞不进就缩小）
-  $arrowFont = $null
-  $arrowW = 0
-  foreach ($afs in (40 .. 20)) {
-    $tryAF = New-Object Drawing.Font('Microsoft YaHei UI', ($afs / 2))
-    $tryW = [System.Windows.Forms.TextRenderer]::MeasureText([char]0x2192, $tryAF).Width
-    if ($null -ne $arrowFont) { $arrowFont.Dispose() }
-    $arrowFont = $tryAF
-    $arrowW = $tryW
-    if ($arrowW -le $gap) { break }
-  }
-
-  $x = [int](($sender.Width - ($total + $gap * 4)) / 2)
-  $y = [int](($sender.Height - $chipH) / 2)
-
-  for ($i = 0; $i -lt $Steps.Count; $i++) {
-    $st = $Steps[$i]
-    $w = $widths[$i]
-    $glow = ($null -ne $st.Glow) -and $S[$st.Glow].Running
-
-    # 运行中：呼吸光晕
-    if ($glow) {
-      $alpha = [int](130 + 80 * [Math]::Sin($glowPhase))
-      $halo = [Drawing.Color]::FromArgb($alpha, $st.A)
-      $hp = New-RoundedPath ($x - 4) ($y - 4) ($w + 8) ($chipH + 8) 20
-      $g.DrawPath((New-Object Drawing.Pen($halo, 2.4)), $hp)
-      $hp.Dispose()
+    # 自适应步骤字号：逐级缩小直到 5 个胶囊放得下（兼容高 DPI / 大字体）
+    $chipFont = $null
+    $widths = $null
+    $total = 0
+    foreach ($fs in (24 .. 16)) {
+      $tryFont = New-Object Drawing.Font('Microsoft YaHei UI', ($fs / 2))
+      $tryWidths = @()
+      $tryTotal = 0
+      foreach ($st in $Steps) {
+        $tw = [System.Windows.Forms.TextRenderer]::MeasureText($st.T, $tryFont).Width
+        $w = 12 + 20 + 8 + $tw + 13
+        $tryWidths += $w
+        $tryTotal += $w
+      }
+      if ($null -ne $chipFont) { $chipFont.Dispose() }
+      $chipFont = $tryFont
+      $widths = $tryWidths
+      $total = $tryTotal
+      if (($total + $minGap * 4) -le ($sender.Width - $sideMargin * 2)) { break }
     }
 
-    $bgc = if ($glow) { Blend-Color $C.chip $st.A 0.16 } else { $C.chip }
-    $cp = New-RoundedPath $x $y $w $chipH 17
-    $g.FillPath((New-Object Drawing.SolidBrush($bgc)), $cp)
-    $bc = if ($glow) { $st.A } else { $C.chipBorder }
-    $g.DrawPath((New-Object Drawing.Pen($bc, $(if ($glow) { 1.6 } else { 1.0 }))), $cp)
-    $cp.Dispose()
+    # 间距计算与无箭头版本完全相同 → 整体占位、两侧边距不变
+    $gap = [int](($sender.Width - $sideMargin * 2 - $total) / 4)
+    if ($gap -lt $minGap) { $gap = $minGap }
+    if ($gap -gt 48) { $gap = 48 }
 
-    # 数字圆徽
-    $bx = $x + 12
-    $by = $y + [int](($chipH - 20) / 2)
-    $g.FillEllipse((New-Object Drawing.SolidBrush($st.A)), $bx, $by, 20, 20)
-    $ns = [System.Windows.Forms.TextRenderer]::MeasureText($st.N, $chipFont)
-    [System.Windows.Forms.TextRenderer]::DrawText($g, $st.N, $chipFont,
-      (New-Object Drawing.Point(($bx + 11.5 - [int]($ns.Width / 2)), (($by + 11.5 - [int]($ns.Height / 2)) - 1))), $C.dark)
-
-    # 步骤文字
-    $ts = [System.Windows.Forms.TextRenderer]::MeasureText($st.T, $chipFont)
-    [System.Windows.Forms.TextRenderer]::DrawText($g, $st.T, $chipFont,
-      (New-Object Drawing.Point(($bx + 28), ($y + [int](($chipH - $ts.Height) / 2)))), $C.primary)
-
-    $x += $w
-
-    # 箭头：画在原间距内居中，不额外增加总宽度
-    if ($i -lt $Steps.Count - 1) {
-      $asz = [System.Windows.Forms.TextRenderer]::MeasureText([char]0x2192, $arrowFont)
-      $ax = $x + [int](($gap - $asz.Width) / 2)
-      $ac = if ($glow) { $st.A } else { $C.dim }
-      [System.Windows.Forms.TextRenderer]::DrawText($g, [char]0x2192, $arrowFont,
-        (New-Object Drawing.Point($ax, ($y + [int](($chipH - $asz.Height) / 2)))), $ac)
-      $x += $gap
+    # 箭头字号自适应：保证箭头宽度不超过间距（塞不进就缩小）
+    $arrowFont = $null
+    $arrowW = 0
+    foreach ($afs in (40 .. 20)) {
+      $tryAF = New-Object Drawing.Font('Microsoft YaHei UI', ($afs / 2))
+      $tryW = [System.Windows.Forms.TextRenderer]::MeasureText([char]0x2192, $tryAF).Width
+      if ($null -ne $arrowFont) { $arrowFont.Dispose() }
+      $arrowFont = $tryAF
+      $arrowW = $tryW
+      if ($arrowW -le $gap) { break }
     }
-  }
 
-  $chipFont.Dispose()
-  $arrowFont.Dispose()
-})
+    $x = [int](($sender.Width - ($total + $gap * 4)) / 2)
+    $y = [int](($sender.Height - $chipH) / 2)
+
+    for ($i = 0; $i -lt $Steps.Count; $i++) {
+      $st = $Steps[$i]
+      $w = $widths[$i]
+      $glow = ($null -ne $st.Glow) -and $S[$st.Glow].Running
+
+      # 运行中：呼吸光晕
+      if ($glow) {
+        $alpha = [int](130 + 80 * [Math]::Sin($glowPhase))
+        $halo = [Drawing.Color]::FromArgb($alpha, $st.A)
+        $hp = New-RoundedPath ($x - 4) ($y - 4) ($w + 8) ($chipH + 8) 20
+        $g.DrawPath((New-Object Drawing.Pen($halo, 2.4)), $hp)
+        $hp.Dispose()
+      }
+
+      $bgc = if ($glow) { Blend-Color $C.chip $st.A 0.16 } else { $C.chip }
+      $cp = New-RoundedPath $x $y $w $chipH 17
+      $g.FillPath((New-Object Drawing.SolidBrush($bgc)), $cp)
+      $bc = if ($glow) { $st.A } else { $C.chipBorder }
+      $g.DrawPath((New-Object Drawing.Pen($bc, $(if ($glow) { 1.6 } else { 1.0 }))), $cp)
+      $cp.Dispose()
+
+      # 数字圆徽
+      $bx = $x + 12
+      $by = $y + [int](($chipH - 20) / 2)
+      $g.FillEllipse((New-Object Drawing.SolidBrush($st.A)), $bx, $by, 20, 20)
+      $ns = [System.Windows.Forms.TextRenderer]::MeasureText($st.N, $chipFont)
+      [System.Windows.Forms.TextRenderer]::DrawText($g, $st.N, $chipFont,
+        (New-Object Drawing.Point(($bx + 11.5 - [int]($ns.Width / 2)), (($by + 11.5 - [int]($ns.Height / 2)) - 1))), $C.dark)
+
+      # 步骤文字
+      $ts = [System.Windows.Forms.TextRenderer]::MeasureText($st.T, $chipFont)
+      [System.Windows.Forms.TextRenderer]::DrawText($g, $st.T, $chipFont,
+        (New-Object Drawing.Point(($bx + 28), ($y + [int](($chipH - $ts.Height) / 2)))), $C.primary)
+
+      $x += $w
+
+      # 箭头：画在原间距内居中，不额外增加总宽度
+      if ($i -lt $Steps.Count - 1) {
+        $asz = [System.Windows.Forms.TextRenderer]::MeasureText([char]0x2192, $arrowFont)
+        $ax = $x + [int](($gap - $asz.Width) / 2)
+        $ac = if ($glow) { $st.A } else { $C.dim }
+        [System.Windows.Forms.TextRenderer]::DrawText($g, [char]0x2192, $arrowFont,
+          (New-Object Drawing.Point($ax, ($y + [int](($chipH - $asz.Height) / 2)))), $ac)
+        $x += $gap
+      }
+    }
+
+    $chipFont.Dispose()
+    $arrowFont.Dispose()
+  })
 
 # --- 分隔线 ---
 $divider = New-Object System.Windows.Forms.Panel
@@ -236,14 +236,14 @@ $pCenter.GetType().GetProperty('DoubleBuffered', [Reflection.BindingFlags]'Insta
 $form.Controls.Add($pCenter)
 
 $pCenter.Add_Paint({
-  param($sender, $e)
-  $g = $e.Graphics
-  $dot = New-Object Drawing.SolidBrush((RGB 34 40 52))
-  for ($dx = 16; $dx -lt $sender.Width; $dx += 26) {
-    for ($dy = 14; $dy -lt $sender.Height; $dy += 26) { $g.FillEllipse($dot, $dx, $dy, 2, 2) }
-  }
-  $dot.Dispose()
-})
+    param($sender, $e)
+    $g = $e.Graphics
+    $dot = New-Object Drawing.SolidBrush((RGB 34 40 52))
+    for ($dx = 16; $dx -lt $sender.Width; $dx += 26) {
+      for ($dy = 14; $dy -lt $sender.Height; $dy += 26) { $g.FillEllipse($dot, $dx, $dy, 2, 2) }
+    }
+    $dot.Dispose()
+  })
 
 # --- 按钮 ---
 $runPal = @{ Base = (RGB 194 64 76); Hover = (RGB 212 84 94); Down = (RGB 170 50 60); Fore = [Drawing.Color]::White; Text = '停止运行' }
@@ -437,32 +437,32 @@ $btnPatch.Add_Click({ if ($S.patch.Running) { Stop-Job 'patch' } else { Start-Jo
 
 # 关窗时清理仍在运行的子进程
 $form.Add_FormClosing({
-  foreach ($k in 'create', 'patch') {
-    $j = $S[$k]
-    if ($j.Running -and $j.Process) {
-      $cp = 0; try { $cp = $j.Process.Id } catch {}
-      if ($cp -gt 0) { & taskkill.exe /F /T /PID $cp }
-      try { $j.Process.WaitForExit(3000) } catch {}
+    foreach ($k in 'create', 'patch') {
+      $j = $S[$k]
+      if ($j.Running -and $j.Process) {
+        $cp = 0; try { $cp = $j.Process.Id } catch {}
+        if ($cp -gt 0) { & taskkill.exe /F /T /PID $cp }
+        try { $j.Process.WaitForExit(3000) } catch {}
+      }
     }
-  }
-})
+  })
 
 # ---------------- UI 心跳：检测退出 + 步骤呼吸灯 ----------------
 $glowPhase = 0.0
 $uiTimer = New-Object System.Windows.Forms.Timer
 $uiTimer.Interval = 90
 $uiTimer.Add_Tick({
-  $script:glowPhase += 0.16
-  foreach ($k in 'create', 'patch') {
-    $j = $S[$k]
-    if ($j.Running -and $null -ne $j.Process) {
-      $exited = $false
-      try { $exited = $j.Process.HasExited } catch {}
-      if ($exited) { Finish-Job $k $false }   # 脚本自然跑完也自动复原按钮
+    $script:glowPhase += 0.16
+    foreach ($k in 'create', 'patch') {
+      $j = $S[$k]
+      if ($j.Running -and $null -ne $j.Process) {
+        $exited = $false
+        try { $exited = $j.Process.HasExited } catch {}
+        if ($exited) { Finish-Job $k $false }   # 脚本自然跑完也自动复原按钮
+      }
     }
-  }
-  if ($S.create.Running -or $S.patch.Running) { $wfPanel.Invalidate() }
-})
+    if ($S.create.Running -or $S.patch.Running) { $wfPanel.Invalidate() }
+  })
 $uiTimer.Start()
 
 # ---------------- 启动 ----------------

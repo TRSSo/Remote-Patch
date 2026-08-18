@@ -11,7 +11,7 @@ function Get-RequireFile {
   $Path = (Get-Command $Name -ErrorAction SilentlyContinue).Path
   if ($Path) { return $Path }
   Write-Warning "未找到文件 $Name"
-  Exit 1
+  exit 1
 }
 
 if (-not $Path) {
@@ -23,7 +23,7 @@ if (-not $Path) {
 
   if ($FolderBrowser.ShowDialog() -eq [System.Windows.Forms.DialogResult]::Cancel) {
     Write-Warning "操作已取消"
-    Exit 1
+    exit 1
   }
   $Path = $FolderBrowser.SelectedPath
 }
@@ -31,16 +31,19 @@ if (-not $Path) {
 $OutputPath = if ($OutputPath) {
   if (Split-Path -IsAbsolute $OutputPath) {
     $OutputPath
-  } else { Join-Path $PWD $OutputPath }
-} else { "TRSS-Check.exe" }
+  }
+  else { Join-Path $PWD $OutputPath }
+}
+else { "TRSS-Check.exe" }
 
 try {
   Set-Location $Path
   [System.IO.Directory]::SetCurrentDirectory($Path)
   Write-Host "切换到文件夹: $PWD" -ForegroundColor Green
-} catch {
+}
+catch {
   Write-Warning "无法进入 $Path 详情: $_"
-  Exit 1
+  exit 1
 }
 
 Write-Host "正在扫描文件，计算文件哈希值..." -ForegroundColor Cyan
@@ -62,12 +65,13 @@ foreach ($file in $files) {
   try {
     # 构造输出信息
     $CsvData.Add([PSCustomObject]@{
-      Path = $relPath
-      Hash = (Get-FileHash -Algorithm SHA512 $file.FullName).Hash
-      Length = $file.Length
-      Time = ([DateTimeOffset]$file.LastWriteTime).ToUnixTimeSeconds()
-    })
-  } catch { Write-Warning "无法处理文件: $file.FullName 详情: $_" }
+        Path   = $relPath
+        Hash   = (Get-FileHash -Algorithm SHA512 $file.FullName).Hash
+        Length = $file.Length
+        Time   = ([DateTimeOffset]$file.LastWriteTime).ToUnixTimeSeconds()
+      })
+  }
+  catch { Write-Warning "无法处理文件: $file.FullName 详情: $_" }
 }
 Write-Progress -Activity "正在处理文件" -Completed
 $CsvData | Export-Csv -Encoding UTF8 -NoTypeInformation $CsvPath
@@ -217,18 +221,20 @@ ExecuteParameters="-NoProfile -ExecutionPolicy Bypass -File .\check.ps1"
 
 # 8. 使用 7-Zip 打包并生成自解压 EXE
 Write-Host "正在使用 7-Zip 封装自解压包..." -ForegroundColor Cyan
-$7zFile = Join-Path $TempDir ([Guid]::NewGuid().ToString()+".7z")
+$7zFile = Join-Path $TempDir ([Guid]::NewGuid().ToString() + ".7z")
 & $7zExe -m0=zstd a $7zFile "$PakDir\*"
-if ($LASTEXITCODE -ne 0) { Throw $LASTEXITCODE }
+if ($LASTEXITCODE -ne 0) { throw $LASTEXITCODE }
 $outStream = [System.IO.File]::Create($OutputPath)
 try {
   foreach ($f in ($7zSfx, $ConfigFile, $7zFile)) {
     $inStream = [System.IO.File]::OpenRead($f)
     try {
       $inStream.CopyTo($outStream)
-    } finally { $inStream.Close() }
+    }
+    finally { $inStream.Close() }
   }
-} finally { $outStream.Close() }
+}
+finally { $outStream.Close() }
 
 if ($FolderBrowser) {
   Start-Process explorer.exe -ArgumentList "/select,`"$OutputPath`""

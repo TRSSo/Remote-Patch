@@ -1,9 +1,8 @@
-name: Build TRSS-PatchGUI
+name: Build Remote-PatchGUI
 
 on:
   push:
-    branches: ['**']
-    tags: ['v*']
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -48,7 +47,7 @@ jobs:
 
       - name: Download 7-Zip-zstd (Windows x64)
         run: |
-          curl -fSLo 7z-zstd.7z \
+          curl -fLo 7z-zstd.7z \
             "https://github.com/mcmilk/7-Zip-zstd/releases/download/${SEVENZIP_VER}/${SEVENZIP_NAME}"
           echo "${SEVENZIP_WIN_SHA256} 7z-zstd.7z" | sha256sum -c
           7z e -y 7z-zstd.7z -otemp
@@ -57,7 +56,7 @@ jobs:
 
       - name: Download 7-Zip-zstd SFX module
         run: |
-          curl -fSLo Sfx-Setup.7z \
+          curl -fLo Sfx-Setup.7z \
             "https://github.com/mcmilk/7-Zip-zstd/releases/download/${SEVENZIP_SFX_VER}/Sfx-Setup-x64-ndm.7z"
           echo "${SEVENZIP_SFX_SHA256} Sfx-Setup.7z" | sha256sum -c
           7z e -y Sfx-Setup.7z -otemp
@@ -66,7 +65,7 @@ jobs:
 
       - name: Download HDiffPatch
         run: |
-          curl -fSLo hdiffpatch.zip \
+          curl -fLo hdiffpatch.zip \
             "https://github.com/sisong/HDiffPatch/releases/download/${HDIFFPATCH_VER}/hdiffpatch_${HDIFFPATCH_VER}_bin_windows64.zip"
           echo "${HDIFFPATCH_SHA256} hdiffpatch.zip" | sha256sum -c
           7z e -y hdiffpatch.zip -otemp
@@ -75,7 +74,7 @@ jobs:
 
       - name: Download hsynz
         run: |
-          curl -fSLo hsynz.zip \
+          curl -fLo hsynz.zip \
             "https://github.com/sisong/hsynz/releases/download/${HSYNZ_VER}/hsynz_${HSYNZ_VER}_bin_windows64.zip"
           echo "${HSYNZ_SHA256} hsynz.zip" | sha256sum -c
           7z e -y hsynz.zip -otemp
@@ -84,7 +83,7 @@ jobs:
 
       - name: Download 7-Zip-zstd (Linux) for zstd compression
         run: |
-          curl -fSLo 7z-zstd-linux.zip \
+          curl -fLo 7z-zstd-linux.zip \
             "https://github.com/mcmilk/7-Zip-zstd/releases/download/${SEVENZIP_VER}/linux-gcc-x64.zip"
           echo "${SEVENZIP_LINUX_SHA256} 7z-zstd-linux.zip" | sha256sum -c
           7z e -y 7z-zstd-linux.zip -otemp
@@ -99,7 +98,7 @@ jobs:
 
       - name: Create 7-Zip-zstd SFX executable
         run: |
-          OUTPUT_NAME="TRSS-PatchGUI-${GITHUB_REF_NAME//\//-}.exe"
+          OUTPUT_NAME="Remote-PatchGUI-${GITHUB_REF_NAME//\//-}.exe"
           cat payload/7zSD.sfx - payload.7z > "$OUTPUT_NAME" << 'EOF'
           ;!@Install@!UTF-8!
           ExecuteFile="powershell.exe"
@@ -122,4 +121,3 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: ${{ env.OUTPUT_NAME }}
-          generate_release_notes: true

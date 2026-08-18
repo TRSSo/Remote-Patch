@@ -136,9 +136,9 @@ foreach ($file in $files) {
   } elseif ($oldFile.Length -ne $file.Length) {
     # 对比大小判断是否修改
     $filesToDiff.Add([PSCustomObject]@{
-      Path = $relPath
-      Hash = $oldFile.Hash
-    })
+        Path = $relPath
+        Hash = $oldFile.Hash
+      })
   } else {
     # 检查哈希缓存有效性
     $newFile = $newData[$relPath]
@@ -151,9 +151,9 @@ foreach ($file in $files) {
     # 对比哈希判断是否修改
     if ($hash -ine $oldFile.Hash) {
       $filesToDiff.Add([PSCustomObject]@{
-        Path = $relPath
-        Hash = $oldFile.Hash
-      })
+          Path = $relPath
+          Hash = $oldFile.Hash
+        })
     }
   }
 }
@@ -371,13 +371,11 @@ Get-ChildItem -Force -Recurse -File -LiteralPath $dstDir | ForEach-Object {
 # 4. 清理残留的空文件夹
 $ScriptContent += @'
 $i = 0
-$deletedDirs | Sort-Object { $_.Length } -Descending | ForEach-Object {
+$deleteDirs | Sort-Object { $_.Length } -Descending | ForEach-Object {
   $i++
   if ((Get-ChildItem -Force -LiteralPath $_ -ErrorAction SilentlyContinue).Count -eq 0) {
     Write-Progress -Activity "正在处理文件" -Status "[删除] ($i / $($deleteDirs.Count)) $_" -PercentComplete (($i / $deleteDirs.Count) * 100)
-    try {
-      Remove-Item -Force $_
-    } catch { Write-Warning "$relPath 详情: $_" }
+    Remove-Item -Force $_ -ErrorAction SilentlyContinue
   }
 }
 Write-Progress -Activity "正在处理文件" -Completed
