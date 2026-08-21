@@ -69,7 +69,7 @@ try {
   Exit 1
 }
 
-$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
 # 退出时清理临时文件
 [void](Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action ([ScriptBlock]::Create("Remove-Item -Force -Recurse '$($TempDir.Replace("'", "''"))'")))
 
@@ -79,7 +79,7 @@ if ($CsvPath -like "*.7z") {
     Write-Host "检测到 7-Zip 压缩包，正在解压..." -ForegroundColor Cyan
 
     # 创建唯一的临时解压文件夹
-    $UncompressDir = Join-Path $TempDir ([Guid]::NewGuid().ToString())
+    $UncompressDir = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
     & $7zExe x -y "-o$UncompressDir" $CsvPath
     if ($LASTEXITCODE -ne 0) { Throw $LASTEXITCODE }
 
@@ -153,6 +153,7 @@ foreach ($file in $files) {
       $filesToDiff.Add([PSCustomObject]@{
           Path = $relPath
           Hash = $oldFile.Hash
+          Length = $newFile.Length
         })
     }
   }
@@ -174,7 +175,7 @@ if ($filesCount -eq 0) {
 Write-Host "正在提取并处理补丁文件..." -ForegroundColor Cyan
 
 # 定义临时打包阶段文件夹
-$PakDir = Join-Path $TempDir ([Guid]::NewGuid().ToString())
+$PakDir = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
 [void](New-Item -Force -ItemType Directory $PakDir)
 
 $i = 0
@@ -204,19 +205,19 @@ foreach ($oldFile in $filesToDiff) {
   # 先对老文件所在路径寻找，假设老文件就在执行 patch 时弹出的 CSV 同级文件夹下
   $oldPath = Join-Path $oldPathDir $relPath
   $dstPath  = Join-Path (Join-Path $PakDir "hdiff") $relPath
+  $tmpPath = Join-Path $PSScriptRoot ([System.IO.Path]::GetRandomFileName())
 
   if (Test-Path $oldPath) {
     # 通过老文件对新文件生成 hdiff 增量补丁
-    $patchCmd = {
-      & $HDiffZExe -SD $oldPath $relPath $dstPath >$null
-    }
+    & $HDiffZExe -SD $oldPath $relPath $tmpPath >$null
   } elseif (Test-Path "$oldPath.hsyni") {
     # 通过老文件签名对新文件生成 hdiff 增量补丁
-    $patchCmd = {
-      & $HDiffSExe "$oldPath.hsyni" $relPath $dstPath >$null
-    }
-  } else {
-    # 未找到老文件，退回到全量复制
+    & $HDiffSExe "$oldPath.hsyni" $relPath $tmpPath >$null
+  }
+
+  if (-not (Test-Path $tmpPath) -or (Get-Item $tmpPath).Length >= $oldFile.Length) {
+    # 未找到老文件或增量文件≥新文件，退回到全量复制
+    Remove-Item -Force $tmpPath -ErrorAction SilentlyContinue
     $dstPath = Join-Path (Join-Path $PakDir "new") $relPath
     $dstDir  = Split-Path -Parent $dstPath
     if (-not (Test-Path $dstDir)) {
@@ -230,7 +231,7 @@ foreach ($oldFile in $filesToDiff) {
   if (-not (Test-Path $dstDir)) {
     [void](New-Item -Force -ItemType Directory $dstDir)
   }
-  & $patchCmd
+  Move-Item -Force -LiteralPath $tmpPath -Destination $dstPath
   if ($LASTEXITCODE -ne 0) { Throw $LASTEXITCODE }
   # 写入哈希值
   $hashBytes = [byte[]](0 .. (($oldFile.Hash.Length / 2) - 1) | ForEach-Object { [System.Convert]::ToByte($oldFile.Hash.Substring(($_ * 2), 2), 16) })
@@ -331,10 +332,10 @@ Get-ChildItem -Force -Recurse -File -LiteralPath $dstDir | ForEach-Object {
     $hash = [System.BitConverter]::ToString($hashBytes).Replace("-", "")
     if ($hash -ine (Get-FileHash -Algorithm SHA512 $relPath).Hash) { Throw "文件已修改，无法应用" }
 
-    $tmpFile = Join-Path $PSScriptRoot ([Guid]::NewGuid().ToString())
+    $tmpPath = Join-Path $PSScriptRoot ([System.IO.Path]::GetRandomFileName())
     & $HPatchZExe $relPath $dstPath $tmpFile >$null
     if ($LASTEXITCODE -ne 0) { Throw $LASTEXITCODE }
-    Move-Item -Force -LiteralPath $tmpFile -Destination $relPath
+    Move-Item -Force -LiteralPath $tmpPath -Destination $relPath
   } catch { Write-Warning "$relPath 详情: $_" }
 }
 
@@ -385,7 +386,7 @@ Read-Host "更新完成，按回车键退出"
 $ScriptContent | Set-Content -Encoding UTF8 (Join-Path $PakDir "patch.ps1")
 
 # 7. 生成 7-Zip SFX 配置文件
-$ConfigFile = Join-Path $TempDir ([Guid]::NewGuid().ToString())
+$ConfigFile = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
 (@'
 ;!@Install@!UTF-8!
 ExecuteFile="powershell.exe"
@@ -395,7 +396,7 @@ ExecuteParameters="-NoProfile -ExecutionPolicy Bypass -File .\patch.ps1"
 
 # 8. 使用 7-Zip 打包并生成自解压 EXE
 Write-Host "正在使用 7-Zip 封装自解压包..." -ForegroundColor Cyan
-$7zFile = Join-Path $TempDir ([Guid]::NewGuid().ToString()+".7z")
+$7zFile = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName()+".7z")
 & $7zExe a -m0=zstd $7zFile "$PakDir\*"
 if ($LASTEXITCODE -ne 0) { Throw $LASTEXITCODE }
 $outStream = [System.IO.File]::Create($OutputPath)

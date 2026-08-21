@@ -82,12 +82,12 @@ $7zDll = Get-RequireFile 7z.dll
 $7zSfx = Get-RequireFile 7zSD.sfx
 $HSyncMExe = Get-RequireFile hsync_make.exe
 
-$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
 # 退出时清理临时文件
 [void](Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action ([ScriptBlock]::Create("Remove-Item -Force -Recurse '$($TempDir.Replace("'", "''"))'")))
 
 # 定义临时打包阶段文件夹
-$PakDir = Join-Path $TempDir ([Guid]::NewGuid().ToString())
+$PakDir = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
 [void](New-Item -Force -ItemType Directory $PakDir)
 
 # 1. 复制
@@ -147,12 +147,12 @@ try {
   Exit 1
 }
 
-$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
 # 退出时清理临时文件
 [void](Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action ([ScriptBlock]::Create("Remove-Item -Force -Recurse '$($TempDir.Replace("'", "''"))'")))
 
 # 定义临时打包阶段文件夹
-$PakDir = Join-Path $TempDir ([Guid]::NewGuid().ToString())
+$PakDir = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
 [void](New-Item -Force -ItemType Directory $PakDir)
 
 Write-Host "正在扫描文件，计算文件哈希值..." -ForegroundColor Cyan
@@ -211,7 +211,7 @@ Read-Host "检测结果已生成，按回车键退出"
   Set-Content -Encoding UTF8 (Join-Path $PakDir "check.ps1")
 
 # 7. 生成 7-Zip SFX 配置文件
-$ConfigFile = Join-Path $TempDir ([Guid]::NewGuid().ToString())
+$ConfigFile = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
 (@'
 ;!@Install@!UTF-8!
 ExecuteFile="powershell.exe"
@@ -221,7 +221,7 @@ ExecuteParameters="-NoProfile -ExecutionPolicy Bypass -File .\check.ps1"
 
 # 8. 使用 7-Zip 打包并生成自解压 EXE
 Write-Host "正在使用 7-Zip 封装自解压包..." -ForegroundColor Cyan
-$7zFile = Join-Path $TempDir ([Guid]::NewGuid().ToString() + ".7z")
+$7zFile = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName() + ".7z")
 & $7zExe -m0=zstd a $7zFile "$PakDir\*"
 if ($LASTEXITCODE -ne 0) { throw $LASTEXITCODE }
 $outStream = [System.IO.File]::Create($OutputPath)
