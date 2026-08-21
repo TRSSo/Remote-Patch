@@ -14,6 +14,17 @@ function Get-RequireFile {
   exit 1
 }
 
+$xxhsumExe = Get-RequireFile xxhsum.exe
+$7zExe = Get-RequireFile 7z.exe
+$7zDll = Get-RequireFile 7z.dll
+$7zSfx = Get-RequireFile 7zSD.sfx
+$HSyncMExe = Get-RequireFile hsync_make.exe
+
+$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+[void](New-Item -Force -ItemType Directory $TempDir)
+# 退出时清理临时文件
+[void](Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action ([ScriptBlock]::Create("Remove-Item -Force -Recurse '$($TempDir.Replace("'", "''"))'")))
+
 if (-not $Path) {
   Add-Type -AssemblyName System.Windows.Forms
   $FolderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -56,42 +67,58 @@ foreach ($file in ($CsvPath, $OutputPath, "TRSS-Patch.exe")) {
 
 # 扫描文件
 $files = Get-ChildItem -Force -Recurse -File
-$i = 0
-foreach ($file in $files) {
-  $i++
-  $relPath = Resolve-Path -Relative -LiteralPath $file.FullName
-  Write-Progress -Activity "正在处理文件" -Status "($i / $($files.Count)) $relPath" -PercentComplete (($i / $files.Count) * 100)
+$fileList = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
+$paths = $files | ForEach-Object {
+  Resolve-Path -Relative -LiteralPath $_.FullName
+}
+[System.IO.File]::WriteAllLines(
+  $fileList,
+  $paths,
+  [System.Text.UTF8Encoding]::new($false)
+)
 
+$hashMap = @{}
+& $xxhsumExe -H2 --filelist $fileList | ForEach-Object {
+  if ([string]::IsNullOrWhiteSpace($_)) { return }
+  if ($_ -match "^\\?([0-9a-f]+)\s+(.*)$") {
+    $relPath = $Matches[2].Replace("\\", "\")
+    $hashMap[$relPath] = $Matches[1]
+  } else {
+    Write-Warning "无法解析 xxhsum 输出行: $_"
+  }
+}
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning "xxhsum 退出码：$LASTEXITCODE，部分文件可能未计算成功"
+}
+
+foreach ($file in $files) {
+  $relPath = Resolve-Path -Relative -LiteralPath $file.FullName
   try {
-    # 构造输出信息
+    $hash = $hashMap[$relPath]
+    if (-not $hash) {
+      Write-Warning "未找到文件哈希: $relPath"
+      $hash = ((& $xxhsumExe -H2 $relPath).TrimStart("\").Split(" ", 2))[0]
+    }
     $CsvData.Add([PSCustomObject]@{
         Path   = $relPath
-        Hash   = (Get-FileHash -Algorithm SHA512 $file.FullName).Hash
+        Hash   = $hash
         Length = $file.Length
         Time   = ([DateTimeOffset]$file.LastWriteTime).ToUnixTimeSeconds()
       })
   }
-  catch { Write-Warning "无法处理文件: $file.FullName 详情: $_" }
+  catch {
+    Write-Warning "无法处理文件: $relPath 详情: $_"
+  }
 }
-Write-Progress -Activity "正在处理文件" -Completed
 $CsvData | Export-Csv -Encoding UTF8 -NoTypeInformation $CsvPath
 Write-Host "哈希值已保存至: $CsvPath" -ForegroundColor Green
-
-$7zExe = Get-RequireFile 7z.exe
-$7zDll = Get-RequireFile 7z.dll
-$7zSfx = Get-RequireFile 7zSD.sfx
-$HSyncMExe = Get-RequireFile hsync_make.exe
-
-$TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
-# 退出时清理临时文件
-[void](Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action ([ScriptBlock]::Create("Remove-Item -Force -Recurse '$($TempDir.Replace("'", "''"))'")))
 
 # 定义临时打包阶段文件夹
 $PakDir = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
 [void](New-Item -Force -ItemType Directory $PakDir)
 
 # 1. 复制
-foreach ($target in ($CsvPath, $7zExe, $7zDll, $HSyncMExe)) {
+foreach ($target in ($CsvPath, $xxhsumExe, $7zExe, $7zDll, $HSyncMExe)) {
   Copy-Item -Force -LiteralPath $target -Destination $PakDir
 }
 
@@ -119,6 +146,7 @@ try {
   Exit 1
 }
 
+$xxhsumExe = Join-Path $PSScriptRoot "xxhsum.exe"
 $7zExe = Join-Path $PSScriptRoot "7z.exe"
 $HSyncMExe = Join-Path $PSScriptRoot "hsync_make.exe"
 
@@ -148,6 +176,7 @@ try {
 }
 
 $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+[void](New-Item -Force -ItemType Directory $TempDir)
 # 退出时清理临时文件
 [void](Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action ([ScriptBlock]::Create("Remove-Item -Force -Recurse '$($TempDir.Replace("'", "''"))'")))
 
@@ -163,22 +192,44 @@ if (Test-Path $OutputPath) { Remove-Item -Force -Recurse $OutputPath }
 
 # 扫描文件
 $files = Get-ChildItem -Force -Recurse -File
-$i = 0
+$fileList = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
+$paths = $files | ForEach-Object {
+  Resolve-Path -Relative -LiteralPath $_.FullName
+}
+[System.IO.File]::WriteAllLines(
+  $fileList,
+  $paths,
+  [System.Text.UTF8Encoding]::new($false)
+)
+
+$hashMap = @{}
+& $xxhsumExe -H2 --filelist $fileList | ForEach-Object {
+  if ([string]::IsNullOrWhiteSpace($_)) { return }
+  if ($_ -match "^\\?([0-9a-f]+)\s+(.*)$") {
+    $relPath = $Matches[2].Replace("\\", "\")
+    $hashMap[$relPath] = $Matches[1]
+  } else {
+    Write-Warning "无法解析 xxhsum 输出行: $_"
+  }
+}
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning "xxhsum 退出码：$LASTEXITCODE，部分文件可能未计算成功"
+}
+
 foreach ($file in $files) {
-  $i++
   $relPath = Resolve-Path -Relative -LiteralPath $file.FullName
-  Write-Progress -Activity "正在处理文件" -Status "($i / $($files.Count)) $relPath" -PercentComplete (($i / $files.Count) * 100)
-
   try {
-    $hash = (Get-FileHash -Algorithm SHA512 $file.FullName).Hash
-
-    # 构造输出信息
+    $hash = $hashMap[$relPath]
+    if (-not $hash) {
+      Write-Warning "未找到文件哈希: $relPath"
+      $hash = ((& $xxhsumExe -H2 $relPath).TrimStart("\").Split(" ", 2))[0]
+    }
     $CsvData.Add([PSCustomObject]@{
-      Path = $relPath
-      Hash = $hash
-      Length = $file.Length
-      Time = ([DateTimeOffset]$file.LastWriteTime).ToUnixTimeSeconds()
-    })
+        Path   = $relPath
+        Hash   = $hash
+        Length = $file.Length
+        Time   = ([DateTimeOffset]$file.LastWriteTime).ToUnixTimeSeconds()
+      })
 
     if ((-not $newData[$relPath]) -or (
       ($newData[$relPath].Length -eq $file.Length) -and

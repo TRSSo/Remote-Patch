@@ -6,12 +6,14 @@ on:
   workflow_dispatch:
 
 env:
+  XXHASH_VER: "v0.8.3"
   SEVENZIP_VER: "v26.02-v1.5.7-R2"
   SEVENZIP_NAME: "7z26.02-zstd-x64-ndm.exe"
   SEVENZIP_SFX_VER: "v25.01-v1.5.7-R3"
   HDIFFPATCH_VER: "v5.1.3"
   HSYNZ_VER: "v1.3.0"
 
+  XXHASH_SHA256: "a6a6170d07ca37d74151dbea9cd6e1dbb881b5ceea34b9447e01f62b1442d40a"
   SEVENZIP_WIN_SHA256: "c84fa1bef4de48249bbdd5ecf7f6f24b0c1d9fcc1fb7644885af69d2cdee0446"
   SEVENZIP_LINUX_SHA256: "be246e5a284d3b5e738bad5cbb24c2662996ddb9776e09575b5099ab53fa0ba3"
   SEVENZIP_SFX_SHA256: "5be3ea8ce38731570786c700f1d7437ec81d59067b7cb6851242e05a0533c4af"
@@ -44,6 +46,15 @@ jobs:
           for i in ./*.ps1; do
             sed s/v0.0.0/$VERSION/ "$i" > "payload/$i"
           done
+
+      - name: Download xxHash
+        run: |
+          curl -fLo xxhash.zip \
+            "https://github.com/Cyan4973/xxHash/releases/download/${XXHASH_VER}/xxhsum_win64_${XXHASH_VER//./_}.zip"
+          echo "${XXHASH_SHA256} xxhash.zip" | sha256sum -c
+          7z e -y xxhash.zip -otemp
+          mv -vf temp/xxhsum.exe payload
+          rm -rf temp xxhash.zip
 
       - name: Download 7-Zip-zstd (Windows x64)
         run: |

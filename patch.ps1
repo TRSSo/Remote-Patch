@@ -16,6 +16,7 @@ function Get-RequireFile {
 }
 
 # 1. 环境检查
+$xxhsumExe = Get-RequireFile xxhsum.exe
 $7zExe = Get-RequireFile 7z.exe
 $7zSfx = Get-RequireFile 7zSD.sfx
 $HDiffSExe = Get-RequireFile hsign_diff.exe
@@ -70,6 +71,7 @@ try {
 }
 
 $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+[void](New-Item -Force -ItemType Directory $TempDir)
 # 退出时清理临时文件
 [void](Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action ([ScriptBlock]::Create("Remove-Item -Force -Recurse '$($TempDir.Replace("'", "''"))'")))
 
@@ -121,11 +123,35 @@ $filesToDiff = [System.Collections.Generic.List[object]]::new()
 
 # 找出新增和修改的文件
 $files = Get-ChildItem -Force -Recurse -File
-$i = 0
+
+if ($newData.Count -eq 0) {
+  $fileListFile = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
+  $fileList = $files | ForEach-Object {
+    Resolve-Path -Relative -LiteralPath $_.FullName
+  }
+  [System.IO.File]::WriteAllLines(
+    $fileListFile,
+    $fileList,
+    [System.Text.UTF8Encoding]::new($false)
+  )
+
+  $hashMap = @{}
+  & $xxhsumExe -H2 --filelist $fileListFile | ForEach-Object {
+    if ([string]::IsNullOrWhiteSpace($_)) { return }
+    if ($_ -match "^\\?([0-9a-f]+)\s+(.*)$") {
+      $relPath = $Matches[2].Replace("\\", "\")
+      $hashMap[$relPath] = $Matches[1]
+    } else {
+      Write-Warning "无法解析 xxhsum 输出行: $_"
+    }
+  }
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "xxhsum 退出码：$LASTEXITCODE，部分文件可能未计算成功"
+  }
+}
+
 foreach ($file in $files) {
-  $i++
   $relPath = Resolve-Path -Relative -LiteralPath $file.FullName
-  Write-Progress -Activity "正在处理文件" -Status "($i / $($files.Count)) $relPath" -PercentComplete (($i / $files.Count) * 100)
 
   $oldFile = $oldData[$relPath]
   $oldData.Remove($relPath)
@@ -138,6 +164,7 @@ foreach ($file in $files) {
     $filesToDiff.Add([PSCustomObject]@{
         Path = $relPath
         Hash = $oldFile.Hash
+        Length = $file.Length
       })
   } else {
     # 检查哈希缓存有效性
@@ -146,14 +173,18 @@ foreach ($file in $files) {
       ($newFile.Length -eq $file.Length) -and
       ($newFile.Time -eq ([DateTimeOffset]$file.LastWriteTime).ToUnixTimeSeconds())
     ) { $newFile.Hash } else {
-      (Get-FileHash -Algorithm SHA512 $file.FullName).Hash
+      $hashMap[$relPath]
+    }
+    if (-not $hash) {
+      Write-Warning "未找到文件哈希: $relPath"
+      $hash = ((& $xxhsumExe -H2 $relPath).TrimStart("\").Split(" ", 2))[0]
     }
     # 对比哈希判断是否修改
     if ($hash -ine $oldFile.Hash) {
       $filesToDiff.Add([PSCustomObject]@{
           Path = $relPath
           Hash = $oldFile.Hash
-          Length = $newFile.Length
+          Length = $file.Length
         })
     }
   }
@@ -194,7 +225,7 @@ foreach ($relPath in $filesToCopy) {
   Copy-Item -Force -LiteralPath $relPath -Destination $dstPath
 }
 
-# 处理修改的文件 (rdiff 或 hdiff 增量化)
+# 处理修改的文件 (hdiff)
 $oldPathDir = Split-Path -Parent $CsvPath
 foreach ($oldFile in $filesToDiff) {
   $i++
@@ -205,7 +236,7 @@ foreach ($oldFile in $filesToDiff) {
   # 先对老文件所在路径寻找，假设老文件就在执行 patch 时弹出的 CSV 同级文件夹下
   $oldPath = Join-Path $oldPathDir $relPath
   $dstPath  = Join-Path (Join-Path $PakDir "hdiff") $relPath
-  $tmpPath = Join-Path $PSScriptRoot ([System.IO.Path]::GetRandomFileName())
+  $tmpPath = Join-Path $TempDir ([System.IO.Path]::GetRandomFileName())
 
   if (Test-Path $oldPath) {
     # 通过老文件对新文件生成 hdiff 增量补丁
@@ -215,7 +246,7 @@ foreach ($oldFile in $filesToDiff) {
     & $HDiffSExe "$oldPath.hsyni" $relPath $tmpPath >$null
   }
 
-  if (-not (Test-Path $tmpPath) -or (Get-Item $tmpPath).Length >= $oldFile.Length) {
+  if (-not (Test-Path $tmpPath) -or ((Get-Item -LiteralPath $tmpPath).Length -ge $oldFile.Length)) {
     # 未找到老文件或增量文件≥新文件，退回到全量复制
     Remove-Item -Force $tmpPath -ErrorAction SilentlyContinue
     $dstPath = Join-Path (Join-Path $PakDir "new") $relPath
@@ -302,13 +333,42 @@ foreach ($relPath in $deleteFiles) {
 
 # 2. 合并 hdiff 增量文件
 if (Test-Path (Join-Path $PakDir "hdiff")) {
-  # 将 hpatchz 复制到临时文件夹中，打包进自解压文件
-  Copy-Item -Force -LiteralPath $HPatchZExe -Destination $PakDir
+  # 将依赖复制到临时文件夹中，打包进自解压文件
+  foreach ($target in ($xxhsumExe, $HPatchZExe)) {
+    Copy-Item -Force -LiteralPath $target -Destination $PakDir
+  }
 
   $ScriptContent += @'
+$xxhsumExe = Join-Path $PSScriptRoot "xxhsum.exe"
 $HPatchZExe = Join-Path $PSScriptRoot "hpatchz.exe"
+
 $dstDir = Join-Path $PSScriptRoot "hdiff"
-Get-ChildItem -Force -Recurse -File -LiteralPath $dstDir | ForEach-Object {
+$files = Get-ChildItem -Force -Recurse -File -LiteralPath $dstDir
+$fileListFile = Join-Path $PSScriptRoot ([System.IO.Path]::GetRandomFileName())
+$fileList = $files | ForEach-Object {
+  $_.FullName.Replace($dstDir, ".")
+}
+[System.IO.File]::WriteAllLines(
+  $fileListFile,
+  $fileList,
+  [System.Text.UTF8Encoding]::new($false)
+)
+
+$hashMap = @{}
+& $xxhsumExe -H2 --filelist $fileListFile | ForEach-Object {
+  if ([string]::IsNullOrWhiteSpace($_)) { return }
+  if ($_ -match "^\\?([0-9a-f]+)\s+(.*)$") {
+    $relPath = $Matches[2].Replace("\\", "\")
+    $hashMap[$relPath] = $Matches[1]
+  } else {
+    Write-Warning "无法解析 xxhsum 输出行: $_"
+  }
+}
+if ($LASTEXITCODE -ne 0) {
+  Write-Warning "xxhsum 退出码：$LASTEXITCODE，部分文件可能未计算成功"
+}
+
+$files | ForEach-Object {
   $i++
   $dstPath = $_.FullName
   $relPath = $dstPath.Replace($dstDir, ".")
@@ -317,23 +377,28 @@ Get-ChildItem -Force -Recurse -File -LiteralPath $dstDir | ForEach-Object {
   try {
     if (-not (Test-Path $relPath)) { Throw "文件不存在，无法应用" }
 
+    $hash = $hashMap[$relPath]
+    if (-not $hash) {
+      Write-Warning "未找到文件哈希: $relPath"
+      $hash = ((& $xxhsumExe -H2 $relPath).TrimStart("\").Split(" ", 2))[0]
+    }
+
     $stream = [System.IO.File]::Open($dstPath, "Open", "ReadWrite")
-    $hashBytes = New-Object byte[] 64
+    $hashBytes = New-Object byte[] 16
     try {
-      [void]$stream.Seek(-64, [System.IO.SeekOrigin]::End)
+      [void]$stream.Seek(-16, [System.IO.SeekOrigin]::End)
       $bytesRead = 0
-      while ($bytesRead -lt 64) {
-        $n = $stream.Read($hashBytes, $bytesRead, 64 - $bytesRead)
+      while ($bytesRead -lt 16) {
+        $n = $stream.Read($hashBytes, $bytesRead, 16 - $bytesRead)
         if ($n -eq 0) { Throw "补丁文件读取错误" }
         $bytesRead += $n
       }
-      $stream.SetLength($stream.Length - 64)
+      $stream.SetLength($stream.Length - 16)
     } finally { $stream.Close() }
-    $hash = [System.BitConverter]::ToString($hashBytes).Replace("-", "")
-    if ($hash -ine (Get-FileHash -Algorithm SHA512 $relPath).Hash) { Throw "文件已修改，无法应用" }
+    if ($hash -ine ([System.BitConverter]::ToString($hashBytes).Replace("-", ""))) { Throw "文件已修改，无法应用" }
 
     $tmpPath = Join-Path $PSScriptRoot ([System.IO.Path]::GetRandomFileName())
-    & $HPatchZExe $relPath $dstPath $tmpFile >$null
+    & $HPatchZExe $relPath $dstPath $tmpPath >$null
     if ($LASTEXITCODE -ne 0) { Throw $LASTEXITCODE }
     Move-Item -Force -LiteralPath $tmpPath -Destination $relPath
   } catch { Write-Warning "$relPath 详情: $_" }
